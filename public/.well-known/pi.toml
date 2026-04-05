@@ -1,0 +1,10 @@
+# Pi Network App Verification
+# Place this file at: public/.well-known/pi.toml
+
+[app]
+name = "pipump"
+description = "PiPump — Launch and trade memecoins on Pi Network"
+url = "https://yourusername.github.io/pipump/"
+
+[payments]
+enabled = true
