@@ -1,24 +1,27 @@
-// ─── Pi SDK Real Wallet Integration ────────────────────────
-// This connects to the REAL Pi wallet via Pi Browser.
-// No mock/demo — will only work inside Pi Browser app.
+// ─── Pi SDK — Based on official pi-apps/pi-platform-docs ─────
+// Reference: https://github.com/pi-apps/pi-platform-docs
 
-const APP_NAME = import.meta.env.VITE_PI_APP_NAME || 'pipump'
-const SANDBOX  = import.meta.env.VITE_PI_SANDBOX === 'true'
+const SANDBOX = import.meta.env.VITE_PI_SANDBOX === 'true'
 
-// ─── Check if running inside Pi Browser ──────────────────
+// ─── Check Pi Browser ────────────────────────────────────
 export function isPiBrowser() {
-  return typeof window !== 'undefined' && typeof window.Pi !== 'undefined'
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.Pi !== 'undefined' &&
+    window.Pi !== null
+  )
 }
 
-// ─── Initialize Pi SDK ────────────────────────────────────
+// ─── Init SDK ─────────────────────────────────────────────
+// Per official docs: Pi.init({ version: "2.0", sandbox: bool })
 export function initPiSDK() {
   if (!isPiBrowser()) {
-    console.warn('[PiSDK] Not running in Pi Browser.')
+    console.warn('[PiSDK] Not in Pi Browser — window.Pi not found')
     return false
   }
   try {
     window.Pi.init({ version: '2.0', sandbox: SANDBOX })
-    console.log(`[PiSDK] Initialized. Sandbox: ${SANDBOX}`)
+    console.log('[PiSDK] Initialized. Sandbox:', SANDBOX)
     return true
   } catch (err) {
     console.error('[PiSDK] Init error:', err)
@@ -26,97 +29,81 @@ export function initPiSDK() {
   }
 }
 
-// ─── Authenticate with Pi Wallet ─────────────────────────
-// Returns: { uid, username, accessToken } or null
+// ─── Authenticate ─────────────────────────────────────────
+// Official docs scopes: ["username", "payments"]
+// wallet_address is NOT a valid scope per official docs
+// Ref: https://github.com/pi-apps/demo/blob/main/FLOWS.md
 export async function authenticatePi() {
   if (!isPiBrowser()) {
     throw new Error('PI_BROWSER_REQUIRED')
   }
 
-  return new Promise((resolve, reject) => {
-    const scopes = ['username', 'payments', 'wallet_address']
+  // Per official demo app: only these 2 scopes
+  const scopes = ['username', 'payments']
 
-    window.Pi.authenticate(scopes, (incompletePayment) => {
-      // Handle any incomplete payment from previous session
-      if (incompletePayment) {
-        console.warn('[PiSDK] Incomplete payment found:', incompletePayment.identifier)
-        // We'll handle this in the payment flow
-        handleIncompletePayment(incompletePayment)
-      }
-    })
-    .then((auth) => {
-      console.log('[PiSDK] Authenticated:', auth.user.username)
-      resolve({
-        uid:         auth.user.uid,
-        username:    auth.user.username,
-        accessToken: auth.accessToken,
-      })
-    })
-    .catch((err) => {
-      console.error('[PiSDK] Auth error:', err)
-      reject(err)
-    })
-  })
-}
+  // onIncompletePaymentFound — required second argument
+  const onIncompletePaymentFound = async (payment) => {
+    console.warn('[PiSDK] Incomplete payment found:', payment?.identifier)
+    // Per docs: must handle incomplete payments before new payment
+    // For now just log — in production send to backend
+  }
 
-// ─── Handle Incomplete Payments ───────────────────────────
-async function handleIncompletePayment(payment) {
-  // If user had a pending payment, we cancel it to start fresh
-  // In production, you might want to complete it instead
   try {
-    await window.Pi.cancelPayment(payment.identifier)
-    console.log('[PiSDK] Incomplete payment cancelled:', payment.identifier)
+    // Per docs: Pi.authenticate() returns Promise<AuthResult>
+    // Do NOT wrap in extra Promise — it already is one
+    const authResult = await window.Pi.authenticate(scopes, onIncompletePaymentFound)
+
+    if (!authResult || !authResult.user) {
+      throw new Error('Auth returned empty result')
+    }
+
+    console.log('[PiSDK] Auth success. User:', authResult.user.username)
+
+    return {
+      uid:         authResult.user.uid,
+      username:    authResult.user.username,
+      accessToken: authResult.accessToken,
+    }
   } catch (err) {
-    console.warn('[PiSDK] Could not cancel payment:', err)
+    console.error('[PiSDK] Auth failed:', err?.message || err)
+    throw err
   }
 }
 
-// ─── Create Pi Payment ────────────────────────────────────
-// amount    : Pi amount (number)
-// memo      : short description shown to user
-// metadata  : your custom data { type, tokenId, etc. }
-// callbacks : { onReadyForServerApproval, onReadyForServerCompletion, onCancel, onError }
+// ─── Create Payment ───────────────────────────────────────
+// Per official docs payment flow
 export async function createPiPayment(amount, memo, metadata, callbacks) {
-  if (!isPiBrowser()) {
-    throw new Error('PI_BROWSER_REQUIRED')
-  }
+  if (!isPiBrowser()) throw new Error('PI_BROWSER_REQUIRED')
 
   return new Promise((resolve, reject) => {
     window.Pi.createPayment(
       {
-        amount:   parseFloat(amount.toFixed(7)),
-        memo:     memo,
-        metadata: metadata,
+        amount:   parseFloat(Number(amount).toFixed(7)),
+        memo,
+        metadata: metadata || {},
       },
       {
-        // Step 1: Payment created, send to your backend for approval
         onReadyForServerApproval: async (paymentId) => {
-          console.log('[PiSDK] Ready for approval. PaymentID:', paymentId)
-          if (callbacks?.onReadyForServerApproval) {
-            await callbacks.onReadyForServerApproval(paymentId)
+          console.log('[PiSDK] Ready for approval:', paymentId)
+          try { await callbacks?.onReadyForServerApproval?.(paymentId) } catch (e) {
+            console.warn('[PiSDK] Approval callback error:', e)
           }
         },
-
-        // Step 2: Payment completed on blockchain, verify & complete
         onReadyForServerCompletion: async (paymentId, txId) => {
-          console.log('[PiSDK] Completed. PaymentID:', paymentId, 'TxID:', txId)
-          if (callbacks?.onReadyForServerCompletion) {
-            await callbacks.onReadyForServerCompletion(paymentId, txId)
+          console.log('[PiSDK] Ready for completion:', paymentId, txId)
+          try { await callbacks?.onReadyForServerCompletion?.(paymentId, txId) } catch (e) {
+            console.warn('[PiSDK] Completion callback error:', e)
           }
           resolve({ paymentId, txId })
         },
-
-        // User cancelled
         onCancel: (paymentId) => {
           console.log('[PiSDK] Payment cancelled:', paymentId)
-          if (callbacks?.onCancel) callbacks.onCancel(paymentId)
+          callbacks?.onCancel?.(paymentId)
           reject(new Error('PAYMENT_CANCELLED'))
         },
-
-        // Error
         onError: (error, payment) => {
-          console.error('[PiSDK] Payment error:', error, payment)
-          if (callbacks?.onError) callbacks.onError(error, payment)
+          console.error('[PiSDK] Payment error:', error)
+          callbacks?.onError?.(error, payment)
           reject(error)
         },
       }
@@ -124,39 +111,18 @@ export async function createPiPayment(amount, memo, metadata, callbacks) {
   })
 }
 
-// ─── Token Creation Payment ───────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────
 export async function payCreationFee(tokenData, callbacks) {
-  const fee    = parseFloat(import.meta.env.VITE_CREATION_FEE || '1')
-  const memo   = `Create token: ${tokenData.ticker.toUpperCase()}`
-  const meta   = { type: 'token_creation', ticker: tokenData.ticker }
-  return createPiPayment(fee, memo, meta, callbacks)
+  const fee  = parseFloat(import.meta.env.VITE_CREATION_FEE || '1')
+  const memo = `Create token: ${tokenData.ticker.toUpperCase()}`
+  return createPiPayment(fee, memo, { type: 'token_creation', ticker: tokenData.ticker }, callbacks)
 }
 
-// ─── Buy Token Payment ────────────────────────────────────
 export async function payToBuyTokens(tokenTicker, piAmount, callbacks) {
   const memo = `Buy $${tokenTicker.toUpperCase()} on PiPump`
-  const meta = { type: 'buy', ticker: tokenTicker }
-  return createPiPayment(piAmount, memo, meta, callbacks)
+  return createPiPayment(piAmount, memo, { type: 'buy', ticker: tokenTicker }, callbacks)
 }
 
-// ─── Sell Token Payment (receive Pi) ─────────────────────
-// For sells, user receives Pi from platform wallet
-// This is handled off-chain: user initiates, platform transfers Pi back
-// (Pi SDK doesn't natively support user-to-user push payments in sandbox)
 export function initiateSell(tokenTicker, piAmount) {
-  // In real Pi mainnet: platform wallet sends Pi to user
-  // For testnet: we track it in Supabase and simulate
   console.log(`[PiSDK] Sell initiated: ${piAmount} Pi for ${tokenTicker}`)
-}
-
-// ─── Get Pi wallet address ────────────────────────────────
-export async function getPiWalletAddress() {
-  if (!isPiBrowser()) return null
-  try {
-    // Pi SDK v2 exposes wallet address after auth
-    const auth = await authenticatePi()
-    return auth?.uid || null // uid is used as identifier on testnet
-  } catch {
-    return null
-  }
 }

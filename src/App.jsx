@@ -13,13 +13,13 @@ import Admin       from './pages/Admin'
 import Navbar    from './components/layout/Navbar'
 import BottomNav from './components/layout/BottomNav'
 
-const BASE = import.meta.env.VITE_BASE_URL || '/pipump/'
+// FIXED: reads from env, matches /PiPump/ exactly
+const BASE = import.meta.env.VITE_BASE_URL || '/PiPump/'
 
 export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter basename={BASE}>
-        {/* Toast notifications */}
         <Toaster
           position="top-center"
           toastOptions={{
@@ -39,22 +39,19 @@ export default function App() {
           }}
         />
 
-        {/* Top navbar — desktop */}
         <Navbar />
 
-        {/* Main content */}
         <main className="pb-20 md:pb-0 min-h-screen">
           <Routes>
-            <Route path="/"              element={<Home />} />
-            <Route path="/token/:id"     element={<TokenDetail />} />
-            <Route path="/create"        element={<CreateToken />} />
-            <Route path="/profile/:uid"  element={<Profile />} />
-            <Route path="/profile"       element={<Profile />} />
-            <Route path="/admin"         element={<Admin />} />
+            <Route path="/"             element={<Home />} />
+            <Route path="/token/:id"    element={<TokenDetail />} />
+            <Route path="/create"       element={<CreateToken />} />
+            <Route path="/profile/:uid" element={<Profile />} />
+            <Route path="/profile"      element={<Profile />} />
+            <Route path="/admin"        element={<Admin />} />
           </Routes>
         </main>
 
-        {/* Bottom navigation — mobile only */}
         <BottomNav />
       </BrowserRouter>
     </AuthProvider>

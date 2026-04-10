@@ -3,12 +3,14 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
-  base: '/pipump/', // GitHub Pages repo name
+  base: '/PiPump/',
   build: {
     outDir: 'dist',
     sourcemap: false,
+    chunkSizeWarningLimit: 1000,
   },
   server: {
     port: 3000,
+    allowedHosts: 'all',
   },
 })
