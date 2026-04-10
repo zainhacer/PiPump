@@ -1,10 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 
-const MAX_SIZE_MB    = 2
-const MAX_SIZE_B     = MAX_SIZE_MB * 1024 * 1024
-const ALLOWED_TYPES  = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
-const BUCKET_NAME    = 'pipump'
+const BUCKET = 'pipump'
 
 export function useImageUpload() {
   const [uploading,   setUploading]   = useState(false)
@@ -12,76 +9,82 @@ export function useImageUpload() {
   const [uploadedUrl, setUploadedUrl] = useState(null)
   const [error,       setError]       = useState(null)
 
-  // ─── Validate & preview ───────────────────────────────
   function selectFile(file) {
     setError(null)
     if (!file) return false
 
-    if (!ALLOWED_TYPES.includes(file.type)) {
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp']
+    if (!allowed.includes(file.type)) {
       setError('Only JPG, PNG, GIF, WEBP allowed.')
       return false
     }
-    if (file.size > MAX_SIZE_B) {
-      setError(`Max size is ${MAX_SIZE_MB}MB. Your file: ${(file.size / 1024 / 1024).toFixed(2)}MB`)
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Max size is 5MB.')
       return false
     }
 
-    const url = URL.createObjectURL(file)
-    setPreview(url)
+    setPreview(URL.createObjectURL(file))
     return true
   }
 
-  // ─── Upload to Supabase Storage ───────────────────────
   async function upload(file, userUid) {
     if (!file) return null
-
     setUploading(true)
     setError(null)
 
     try {
-      // Sanitize filename — remove special chars
-      const ext      = file.name.split('.').pop().toLowerCase()
-      const safeName = `${userUid}_${Date.now()}.${ext}`
-      const path     = `token-images/${safeName}`
+      // ── Step 1: Check bucket exists ──────────────────
+      const { data: buckets, error: bucketErr } = await supabase
+        .storage
+        .listBuckets()
 
-      console.log('[Upload] Starting upload to bucket:', BUCKET_NAME)
-      console.log('[Upload] Path:', path)
-      console.log('[Upload] File type:', file.type, '| Size:', (file.size / 1024).toFixed(1), 'KB')
+      console.log('[Upload] All buckets:', buckets?.map(b => b.name))
+      console.log('[Upload] Bucket error:', bucketErr)
 
-      const { data: uploadData, error: uploadErr } = await supabase.storage
-        .from(BUCKET_NAME)
+      const bucketExists = buckets?.some(b => b.name === BUCKET)
+      if (!bucketExists) {
+        throw new Error(`Bucket "${BUCKET}" not found. Create it in Supabase Dashboard → Storage`)
+      }
+
+      // ── Step 2: Upload file ───────────────────────────
+      const ext  = file.name.split('.').pop().toLowerCase() || 'jpg'
+      const path = `token-images/${userUid}_${Date.now()}.${ext}`
+
+      console.log('[Upload] Uploading to:', BUCKET, '/', path)
+      console.log('[Upload] File:', file.name, file.type, file.size, 'bytes')
+
+      const { data, error: upErr } = await supabase.storage
+        .from(BUCKET)
         .upload(path, file, {
           cacheControl: '3600',
-          upsert:       false,
+          upsert:       true,       // upsert=true avoids "already exists" error
           contentType:  file.type,
         })
 
-      if (uploadErr) {
-        console.error('[Upload] Supabase error:', uploadErr)
-        console.error('[Upload] Error message:', uploadErr.message)
-        console.error('[Upload] Error details:', JSON.stringify(uploadErr))
+      if (upErr) {
+        console.error('[Upload] Upload error object:', JSON.stringify(upErr, null, 2))
+        console.error('[Upload] Status:', upErr.statusCode)
+        console.error('[Upload] Message:', upErr.message)
+        console.error('[Upload] Error:', upErr.error)
 
-        // Specific error messages
-        if (uploadErr.message?.includes('Bucket not found')) {
-          throw new Error('Storage bucket "pipump" not found. Please create it in Supabase Dashboard → Storage.')
+        // Show user-friendly message based on error type
+        if (upErr.statusCode === '404' || upErr.message?.includes('Bucket not found')) {
+          throw new Error('Storage bucket not found. Run storage_nuclear.sql in Supabase.')
         }
-        if (uploadErr.message?.includes('not allowed') || uploadErr.statusCode === '403') {
-          throw new Error('Storage permission denied. Run the storage_fix.sql in Supabase SQL Editor.')
+        if (upErr.statusCode === '403' || upErr.message?.includes('not allowed')) {
+          throw new Error('Storage permission denied. Run storage_nuclear.sql in Supabase.')
         }
-        if (uploadErr.message?.includes('already exists')) {
-          // File exists — just get its URL
-          const { data } = supabase.storage.from(BUCKET_NAME).getPublicUrl(path)
-          setUploadedUrl(data.publicUrl)
-          return data.publicUrl
+        if (upErr.statusCode === '413' || upErr.message?.includes('too large')) {
+          throw new Error('File too large. Max 5MB.')
         }
-
-        throw uploadErr
+        throw new Error(upErr.message || 'Upload failed')
       }
 
-      console.log('[Upload] Upload success:', uploadData)
+      console.log('[Upload] Success:', data)
 
+      // ── Step 3: Get public URL ────────────────────────
       const { data: urlData } = supabase.storage
-        .from(BUCKET_NAME)
+        .from(BUCKET)
         .getPublicUrl(path)
 
       console.log('[Upload] Public URL:', urlData.publicUrl)
@@ -89,9 +92,8 @@ export function useImageUpload() {
       return urlData.publicUrl
 
     } catch (err) {
-      const msg = err.message || 'Upload failed'
-      console.error('[Upload] Final error:', msg)
-      setError(msg.length > 80 ? 'Upload failed. Check console for details.' : msg)
+      console.error('[Upload] Final catch:', err.message)
+      setError(err.message || 'Image upload failed. Try again.')
       return null
     } finally {
       setUploading(false)
