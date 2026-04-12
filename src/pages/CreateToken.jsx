@@ -255,29 +255,40 @@ export default function CreateToken() {
     setStep(3)
   }
 
+
   async function handleLaunch() {
     if (!isPiBrowser()) { toast.error('Open in Pi Browser to launch.'); return }
     if (!isConnected)   { toast.error('Connect your Pi wallet first.'); return }
 
     setLaunching(true)
-    const loadingToast = toast.loading('Uploading image...')
 
-    try {
-      let imageUrl = null
-      if (imageFile) {
+    // Step 1: Upload image — optional, token launches even if image fails
+    let imageUrl = null
+    if (imageFile) {
+      const uploadToast = toast.loading('Uploading image...')
+      try {
         imageUrl = await imageUpload.upload(imageFile, user.pi_uid)
-        if (!imageUrl) throw new Error('Image upload failed')
+        toast.dismiss(uploadToast)
+        if (!imageUrl) {
+          toast('Image upload failed — launching without image.', { icon: '⚠️', duration: 3000 })
+        }
+      } catch {
+        toast.dismiss(uploadToast)
+        toast('Image upload failed — launching without image.', { icon: '⚠️', duration: 3000 })
       }
+    }
 
-      toast.loading('Waiting for Pi payment...', { id: loadingToast })
-
+    // Step 2: Pi payment
+    const payToast = toast.loading('Waiting for Pi payment...')
+    try {
       const { paymentId, txId } = await payCreationFee(form, {
         onReadyForServerApproval:   async (pid) => { console.log('[CT] Approved:', pid) },
         onReadyForServerCompletion: async (pid, txid) => {
-          toast.loading('Creating token...', { id: loadingToast })
+          toast.loading('Creating token...', { id: payToast })
         },
       })
 
+      // Step 3: Insert token
       const { data: newToken, error: insertErr } = await supabase
         .from('tokens')
         .insert({
@@ -303,14 +314,17 @@ export default function CreateToken() {
 
       if (insertErr) throw insertErr
 
-      toast.dismiss(loadingToast)
+      toast.dismiss(payToast)
       setSuccess({ tokenId: newToken.id, ticker: newToken.ticker })
 
     } catch (err) {
-      toast.dismiss(loadingToast)
-      if (err.message === 'PAYMENT_CANCELLED') toast('Payment cancelled.', { icon: '❌' })
-      else if (err.message === 'Image upload failed') toast.error('Image upload failed. Try again.')
-      else { toast.error('Launch failed. Try again.'); console.error('[CT]', err) }
+      toast.dismiss(payToast)
+      if (err.message === 'PAYMENT_CANCELLED') {
+        toast('Payment cancelled.', { icon: '❌' })
+      } else {
+        toast.error(`Launch failed: ${err.message || 'Try again'}`)
+        console.error('[CT] Error:', err)
+      }
     } finally {
       setLaunching(false)
     }
