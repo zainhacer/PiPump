@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { supabase } from '../lib/supabase'
 
 const BUCKET = 'pipump'
+const MAX_MB  = 5
 
 export function useImageUpload() {
   const [uploading,   setUploading]   = useState(false)
@@ -18,11 +19,10 @@ export function useImageUpload() {
       setError('Only JPG, PNG, GIF, WEBP allowed.')
       return false
     }
-    if (file.size > 5 * 1024 * 1024) {
-      setError('Max size is 5MB.')
+    if (file.size > MAX_MB * 1024 * 1024) {
+      setError(`Max size is ${MAX_MB}MB.`)
       return false
     }
-
     setPreview(URL.createObjectURL(file))
     return true
   }
@@ -32,72 +32,88 @@ export function useImageUpload() {
     setUploading(true)
     setError(null)
 
+    // ── Try Supabase Storage first ────────────────────
     try {
-      // ── Step 1: Check bucket exists ──────────────────
-      const { data: buckets, error: bucketErr } = await supabase
-        .storage
-        .listBuckets()
-
-      console.log('[Upload] All buckets:', buckets?.map(b => b.name))
-      console.log('[Upload] Bucket error:', bucketErr)
-
-      const bucketExists = buckets?.some(b => b.name === BUCKET)
-      if (!bucketExists) {
-        throw new Error(`Bucket "${BUCKET}" not found. Create it in Supabase Dashboard → Storage`)
-      }
-
-      // ── Step 2: Upload file ───────────────────────────
       const ext  = file.name.split('.').pop().toLowerCase() || 'jpg'
       const path = `token-images/${userUid}_${Date.now()}.${ext}`
 
-      console.log('[Upload] Uploading to:', BUCKET, '/', path)
-      console.log('[Upload] File:', file.name, file.type, file.size, 'bytes')
-
-      const { data, error: upErr } = await supabase.storage
+      const { error: upErr } = await supabase.storage
         .from(BUCKET)
         .upload(path, file, {
           cacheControl: '3600',
-          upsert:       true,       // upsert=true avoids "already exists" error
+          upsert:       true,
           contentType:  file.type,
         })
 
-      if (upErr) {
-        console.error('[Upload] Upload error object:', JSON.stringify(upErr, null, 2))
-        console.error('[Upload] Status:', upErr.statusCode)
-        console.error('[Upload] Message:', upErr.message)
-        console.error('[Upload] Error:', upErr.error)
-
-        // Show user-friendly message based on error type
-        if (upErr.statusCode === '404' || upErr.message?.includes('Bucket not found')) {
-          throw new Error('Storage bucket not found. Run storage_nuclear.sql in Supabase.')
-        }
-        if (upErr.statusCode === '403' || upErr.message?.includes('not allowed')) {
-          throw new Error('Storage permission denied. Run storage_nuclear.sql in Supabase.')
-        }
-        if (upErr.statusCode === '413' || upErr.message?.includes('too large')) {
-          throw new Error('File too large. Max 5MB.')
-        }
-        throw new Error(upErr.message || 'Upload failed')
+      if (!upErr) {
+        const { data } = supabase.storage.from(BUCKET).getPublicUrl(path)
+        setUploadedUrl(data.publicUrl)
+        setUploading(false)
+        return data.publicUrl
       }
 
-      console.log('[Upload] Success:', data)
+      // Log actual error for debugging
+      console.warn('[Upload] Storage failed:', upErr.message, '| Status:', upErr.statusCode)
+      console.warn('[Upload] Falling back to base64...')
 
-      // ── Step 3: Get public URL ────────────────────────
-      const { data: urlData } = supabase.storage
-        .from(BUCKET)
-        .getPublicUrl(path)
-
-      console.log('[Upload] Public URL:', urlData.publicUrl)
-      setUploadedUrl(urlData.publicUrl)
-      return urlData.publicUrl
+      // ── Fallback: convert to base64 dataURL ──────────
+      // This stores image inline in the DB — works without Storage bucket
+      const base64 = await fileToBase64(file)
+      setUploadedUrl(base64)
+      setUploading(false)
+      return base64
 
     } catch (err) {
-      console.error('[Upload] Final catch:', err.message)
-      setError(err.message || 'Image upload failed. Try again.')
-      return null
-    } finally {
-      setUploading(false)
+      console.error('[Upload] Error:', err.message)
+
+      // Last resort: try base64 fallback
+      try {
+        const base64 = await fileToBase64(file)
+        setUploadedUrl(base64)
+        setUploading(false)
+        return base64
+      } catch {
+        setError('Image upload failed. Try a smaller image.')
+        setUploading(false)
+        return null
+      }
     }
+  }
+
+  // ── Convert file to base64 dataURL ──────────────────
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      // Resize image first to keep DB size small
+      const canvas = document.createElement('canvas')
+      const ctx    = canvas.getContext('2d')
+      const img    = new Image()
+      const url    = URL.createObjectURL(file)
+
+      img.onload = () => {
+        // Max 200x200 for base64 storage
+        const MAX = 200
+        let w = img.width
+        let h = img.height
+
+        if (w > h) { if (w > MAX) { h = h * MAX / w; w = MAX } }
+        else        { if (h > MAX) { w = w * MAX / h; h = MAX } }
+
+        canvas.width  = Math.round(w)
+        canvas.height = Math.round(h)
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+
+        URL.revokeObjectURL(url)
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8)
+        resolve(dataUrl)
+      }
+
+      img.onerror = () => {
+        URL.revokeObjectURL(url)
+        reject(new Error('Could not read image'))
+      }
+
+      img.src = url
+    })
   }
 
   function reset() {
