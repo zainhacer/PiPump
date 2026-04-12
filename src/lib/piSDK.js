@@ -1,9 +1,31 @@
-// ─── Pi SDK — Based on official pi-apps/pi-platform-docs ─────
-// Reference: https://github.com/pi-apps/pi-platform-docs
+// ─── Pi SDK — with Server-Side Approval ──────────────────
+const SANDBOX       = import.meta.env.VITE_PI_SANDBOX === 'true'
+const SUPABASE_URL  = import.meta.env.VITE_SUPABASE_URL
+const SUPABASE_KEY  = import.meta.env.VITE_SUPABASE_ANON_KEY
 
-const SANDBOX = import.meta.env.VITE_PI_SANDBOX === 'true'
+// ─── Call Supabase Edge Function for payment approval ────
+async function callPaymentServer(action, paymentId, txId = null) {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/pi-payment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'apikey':        SUPABASE_KEY,
+      },
+      body: JSON.stringify({ action, paymentId, txId }),
+    })
+    const data = await res.json()
+    if (!res.ok) throw new Error(data.error || 'Server error')
+    console.log(`[PiSDK] Server ${action} success:`, data)
+    return data
+  } catch (err) {
+    console.error(`[PiSDK] Server ${action} failed:`, err.message)
+    // Don't throw — let payment continue even if server call fails on testnet
+  }
+}
 
-// ─── Check Pi Browser ────────────────────────────────────
+// ─── isPiBrowser ─────────────────────────────────────────
 export function isPiBrowser() {
   return (
     typeof window !== 'undefined' &&
@@ -12,13 +34,9 @@ export function isPiBrowser() {
   )
 }
 
-// ─── Init SDK ─────────────────────────────────────────────
-// Per official docs: Pi.init({ version: "2.0", sandbox: bool })
+// ─── initPiSDK ───────────────────────────────────────────
 export function initPiSDK() {
-  if (!isPiBrowser()) {
-    console.warn('[PiSDK] Not in Pi Browser — window.Pi not found')
-    return false
-  }
+  if (!isPiBrowser()) return false
   try {
     window.Pi.init({ version: '2.0', sandbox: SANDBOX })
     console.log('[PiSDK] Initialized. Sandbox:', SANDBOX)
@@ -29,49 +47,30 @@ export function initPiSDK() {
   }
 }
 
-// ─── Authenticate ─────────────────────────────────────────
-// Official docs scopes: ["username", "payments"]
-// wallet_address is NOT a valid scope per official docs
-// Ref: https://github.com/pi-apps/demo/blob/main/FLOWS.md
+// ─── authenticatePi ──────────────────────────────────────
 export async function authenticatePi() {
-  if (!isPiBrowser()) {
-    throw new Error('PI_BROWSER_REQUIRED')
-  }
+  if (!isPiBrowser()) throw new Error('PI_BROWSER_REQUIRED')
 
-  // Per official demo app: only these 2 scopes
   const scopes = ['username', 'payments']
 
-  // onIncompletePaymentFound — required second argument
-  const onIncompletePaymentFound = async (payment) => {
-    console.warn('[PiSDK] Incomplete payment found:', payment?.identifier)
-    // Per docs: must handle incomplete payments before new payment
-    // For now just log — in production send to backend
-  }
-
   try {
-    // Per docs: Pi.authenticate() returns Promise<AuthResult>
-    // Do NOT wrap in extra Promise — it already is one
-    const authResult = await window.Pi.authenticate(scopes, onIncompletePaymentFound)
+    const auth = await window.Pi.authenticate(scopes, async (incompletePayment) => {
+      if (incompletePayment?.identifier) {
+        console.warn('[PiSDK] Incomplete payment, cancelling:', incompletePayment.identifier)
+        try { await window.Pi.cancelPayment(incompletePayment.identifier) } catch {}
+      }
+    })
 
-    if (!authResult || !authResult.user) {
-      throw new Error('Auth returned empty result')
-    }
-
-    console.log('[PiSDK] Auth success. User:', authResult.user.username)
-
-    return {
-      uid:         authResult.user.uid,
-      username:    authResult.user.username,
-      accessToken: authResult.accessToken,
-    }
+    if (!auth?.user) throw new Error('Auth returned empty')
+    console.log('[PiSDK] Auth success:', auth.user.username)
+    return { uid: auth.user.uid, username: auth.user.username, accessToken: auth.accessToken }
   } catch (err) {
-    console.error('[PiSDK] Auth failed:', err?.message || err)
+    console.error('[PiSDK] Auth failed:', err.message)
     throw err
   }
 }
 
-// ─── Create Payment ───────────────────────────────────────
-// Per official docs payment flow
+// ─── createPiPayment ─────────────────────────────────────
 export async function createPiPayment(amount, memo, metadata, callbacks) {
   if (!isPiBrowser()) throw new Error('PI_BROWSER_REQUIRED')
 
@@ -83,26 +82,33 @@ export async function createPiPayment(amount, memo, metadata, callbacks) {
         metadata: metadata || {},
       },
       {
+        // Step 1: Approve payment on server
         onReadyForServerApproval: async (paymentId) => {
-          console.log('[PiSDK] Ready for approval:', paymentId)
-          try { await callbacks?.onReadyForServerApproval?.(paymentId) } catch (e) {
-            console.warn('[PiSDK] Approval callback error:', e)
-          }
+          console.log('[PiSDK] Approving payment:', paymentId)
+          // Call our Edge Function to approve
+          await callPaymentServer('approve', paymentId)
+          // Also call user callback if provided
+          try { await callbacks?.onReadyForServerApproval?.(paymentId) } catch {}
         },
+
+        // Step 2: Complete payment on server
         onReadyForServerCompletion: async (paymentId, txId) => {
-          console.log('[PiSDK] Ready for completion:', paymentId, txId)
-          try { await callbacks?.onReadyForServerCompletion?.(paymentId, txId) } catch (e) {
-            console.warn('[PiSDK] Completion callback error:', e)
-          }
+          console.log('[PiSDK] Completing payment:', paymentId, txId)
+          // Call our Edge Function to complete
+          await callPaymentServer('complete', paymentId, txId)
+          // Also call user callback
+          try { await callbacks?.onReadyForServerCompletion?.(paymentId, txId) } catch {}
           resolve({ paymentId, txId })
         },
+
         onCancel: (paymentId) => {
-          console.log('[PiSDK] Payment cancelled:', paymentId)
+          console.log('[PiSDK] Cancelled:', paymentId)
           callbacks?.onCancel?.(paymentId)
           reject(new Error('PAYMENT_CANCELLED'))
         },
+
         onError: (error, payment) => {
-          console.error('[PiSDK] Payment error:', error)
+          console.error('[PiSDK] Error:', error)
           callbacks?.onError?.(error, payment)
           reject(error)
         },
@@ -124,5 +130,5 @@ export async function payToBuyTokens(tokenTicker, piAmount, callbacks) {
 }
 
 export function initiateSell(tokenTicker, piAmount) {
-  console.log(`[PiSDK] Sell initiated: ${piAmount} Pi for ${tokenTicker}`)
+  console.log(`[PiSDK] Sell: ${piAmount} Pi for ${tokenTicker}`)
 }
