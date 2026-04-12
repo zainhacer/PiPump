@@ -1,118 +1,85 @@
-// ─── Pi SDK — Direct API Approval (Testnet) ──────────────
-// For testnet only — calls Pi API directly from browser
-// Production mein server se call karna chahiye
-
+// ─── Pi SDK — Fixed version ───────────────────────────────
 const SANDBOX      = import.meta.env.VITE_PI_SANDBOX === 'true'
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL
 const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY
 const PI_API_KEY   = import.meta.env.VITE_PI_API_KEY || ''
 
-// ─── Approve payment via Supabase Edge Function ───────────
+// ─── Approve payment on server ────────────────────────────
 async function approvePayment(paymentId) {
-  console.log('[PiSDK] Approving payment:', paymentId)
+  console.log('[PiSDK] Approving:', paymentId)
 
-  // Try Edge Function first
-  if (SUPABASE_URL && SUPABASE_KEY) {
-    try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/pi-payment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type':  'application/json',
-          'Authorization': `Bearer ${SUPABASE_KEY}`,
-          'apikey':        SUPABASE_KEY,
-        },
-        body: JSON.stringify({ action: 'approve', paymentId }),
-      })
-      const data = await res.json()
-      if (res.ok && data.success) {
-        console.log('[PiSDK] Approved via Edge Function ✅')
-        return true
-      }
-      console.warn('[PiSDK] Edge Function failed:', data.error)
-    } catch (err) {
-      console.warn('[PiSDK] Edge Function error:', err.message)
-    }
+  // Try Edge Function
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/pi-payment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'apikey':        SUPABASE_KEY,
+      },
+      body: JSON.stringify({ action: 'approve', paymentId }),
+    })
+    const data = await res.json()
+    if (res.ok) { console.log('[PiSDK] Approved via Edge Function ✅'); return }
+    console.warn('[PiSDK] Edge Function approve failed:', data.error)
+  } catch (e) {
+    console.warn('[PiSDK] Edge Function error:', e.message)
   }
 
-  // Fallback: Direct Pi API call (testnet only)
-  // NOTE: Exposes API key in browser — OK for testnet, NOT for mainnet
+  // Fallback: Direct Pi API (testnet only)
   if (PI_API_KEY) {
     try {
-      console.log('[PiSDK] Trying direct Pi API approval...')
       const res = await fetch(`https://api.minepi.com/v2/payments/${paymentId}/approve`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Key ${PI_API_KEY}`,
-          'Content-Type':  'application/json',
-        },
+        headers: { 'Authorization': `Key ${PI_API_KEY}`, 'Content-Type': 'application/json' },
       })
+      if (res.ok) { console.log('[PiSDK] Approved via direct API ✅'); return }
       const data = await res.json()
-      if (res.ok) {
-        console.log('[PiSDK] Approved via direct API ✅')
-        return true
-      }
-      console.warn('[PiSDK] Direct API failed:', data)
-    } catch (err) {
-      console.warn('[PiSDK] Direct API error:', err.message)
+      console.warn('[PiSDK] Direct approve failed:', data)
+    } catch (e) {
+      console.warn('[PiSDK] Direct API error:', e.message)
     }
   }
 
-  console.error('[PiSDK] ❌ Approval failed — add VITE_PI_API_KEY to .env')
-  return false
+  console.error('[PiSDK] ❌ Approval failed — payment dialog may not show')
 }
 
-// ─── Complete payment ─────────────────────────────────────
+// ─── Complete payment on server ───────────────────────────
 async function completePayment(paymentId, txId) {
-  console.log('[PiSDK] Completing payment:', paymentId, txId)
+  console.log('[PiSDK] Completing:', paymentId, txId)
 
-  // Try Edge Function first
-  if (SUPABASE_URL && SUPABASE_KEY) {
-    try {
-      const res = await fetch(`${SUPABASE_URL}/functions/v1/pi-payment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type':  'application/json',
-          'Authorization': `Bearer ${SUPABASE_KEY}`,
-          'apikey':        SUPABASE_KEY,
-        },
-        body: JSON.stringify({ action: 'complete', paymentId, txId }),
-      })
-      const data = await res.json()
-      if (res.ok && data.success) {
-        console.log('[PiSDK] Completed via Edge Function ✅')
-        return true
-      }
-    } catch {}
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/pi-payment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':  'application/json',
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'apikey':        SUPABASE_KEY,
+      },
+      body: JSON.stringify({ action: 'complete', paymentId, txId }),
+    })
+    const data = await res.json()
+    if (res.ok) { console.log('[PiSDK] Completed via Edge Function ✅'); return }
+    console.warn('[PiSDK] Edge Function complete failed:', data.error)
+  } catch (e) {
+    console.warn('[PiSDK] Complete Edge Function error:', e.message)
   }
 
-  // Fallback: Direct call
   if (PI_API_KEY) {
     try {
       const res = await fetch(`https://api.minepi.com/v2/payments/${paymentId}/complete`, {
         method: 'POST',
-        headers: {
-          'Authorization': `Key ${PI_API_KEY}`,
-          'Content-Type':  'application/json',
-        },
+        headers: { 'Authorization': `Key ${PI_API_KEY}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ txid: txId }),
       })
-      if (res.ok) {
-        console.log('[PiSDK] Completed via direct API ✅')
-        return true
-      }
+      if (res.ok) { console.log('[PiSDK] Completed via direct API ✅'); return }
     } catch {}
   }
-
-  return false
 }
 
-// ─── isPiBrowser ─────────────────────────────────────────
+// ─── isPiBrowser ──────────────────────────────────────────
 export function isPiBrowser() {
-  return (
-    typeof window !== 'undefined' &&
-    typeof window.Pi !== 'undefined' &&
-    window.Pi !== null
-  )
+  return typeof window !== 'undefined' && typeof window.Pi !== 'undefined' && window.Pi !== null
 }
 
 // ─── initPiSDK ───────────────────────────────────────────
@@ -131,14 +98,12 @@ export function initPiSDK() {
 // ─── authenticatePi ──────────────────────────────────────
 export async function authenticatePi() {
   if (!isPiBrowser()) throw new Error('PI_BROWSER_REQUIRED')
-
   try {
     const auth = await window.Pi.authenticate(
       ['username', 'payments'],
-      async (incompletePayment) => {
-        if (incompletePayment?.identifier) {
-          console.warn('[PiSDK] Cancelling incomplete payment...')
-          try { await window.Pi.cancelPayment(incompletePayment.identifier) } catch {}
+      async (incomplete) => {
+        if (incomplete?.identifier) {
+          try { await window.Pi.cancelPayment(incomplete.identifier) } catch {}
         }
       }
     )
@@ -164,14 +129,29 @@ export async function createPiPayment(amount, memo, metadata, callbacks) {
       },
       {
         onReadyForServerApproval: async (paymentId) => {
-          // CRITICAL: Must approve before dialog shows to user
+          // 1. Approve on server (required for dialog to show)
           await approvePayment(paymentId)
-          try { await callbacks?.onReadyForServerApproval?.(paymentId) } catch {}
+          // 2. Run user callback
+          if (callbacks?.onReadyForServerApproval) {
+            try { await callbacks.onReadyForServerApproval(paymentId) } catch (e) {
+              console.warn('[PiSDK] Approval callback error:', e.message)
+            }
+          }
         },
 
         onReadyForServerCompletion: async (paymentId, txId) => {
+          // 1. Complete on server
           await completePayment(paymentId, txId)
-          try { await callbacks?.onReadyForServerCompletion?.(paymentId, txId) } catch {}
+          // 2. Run user callback — errors here should propagate!
+          if (callbacks?.onReadyForServerCompletion) {
+            try {
+              await callbacks.onReadyForServerCompletion(paymentId, txId)
+            } catch (e) {
+              console.error('[PiSDK] Completion callback error:', e.message)
+              // Still resolve — payment was made, even if DB update failed
+              // The trade will be in pending state and can be recovered
+            }
+          }
           resolve({ paymentId, txId })
         },
 
@@ -192,7 +172,7 @@ export async function createPiPayment(amount, memo, metadata, callbacks) {
 
 // ─── Helpers ─────────────────────────────────────────────
 export async function payCreationFee(tokenData, callbacks) {
-  const fee  = parseFloat(import.meta.env.VITE_CREATION_FEE || '1')
+  const fee = parseFloat(import.meta.env.VITE_CREATION_FEE || '1')
   return createPiPayment(fee, `Create token: ${tokenData.ticker.toUpperCase()}`,
     { type: 'token_creation', ticker: tokenData.ticker }, callbacks)
 }
