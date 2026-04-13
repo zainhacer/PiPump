@@ -296,19 +296,8 @@ export default function CreateToken() {
 
       if (insertErr) throw insertErr
 
-      // Step 4: FIX — Update platform_config total_tokens
-      // (trigger handles this now, but explicit update as fallback)
-      await supabase
-        .from('platform_config')
-        .update({ total_tokens: supabase.rpc ? undefined : undefined })
-        .neq('id', '00000000-0000-0000-0000-000000000000')
-        .select()
-
-      // Simpler: use raw SQL increment
-      await supabase.rpc('increment_token_count').catch(() => {
-        // If RPC doesn't exist, trigger handles it
-        console.log('[CT] increment_token_count not found, trigger handles it')
-      })
+      // DB trigger automatically updates platform_config.total_tokens on INSERT
+      // No manual update needed
 
       toast.dismiss(payToast)
       setSuccess({ tokenId: newToken.id, ticker: newToken.ticker })
