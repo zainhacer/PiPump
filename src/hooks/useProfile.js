@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
-// ─── Fetch a user's full profile ─────────────────────────
+// ─── Fetch user profile ───────────────────────────────────
 export function useProfile(piUid) {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -26,7 +26,7 @@ export function useProfile(piUid) {
   return { profile, loading, error, setProfile }
 }
 
-// ─── Fetch tokens created by user ────────────────────────
+// ─── Tokens created by user ───────────────────────────────
 export function useCreatedTokens(piUid) {
   const [tokens,  setTokens]  = useState([])
   const [loading, setLoading] = useState(true)
@@ -44,19 +44,16 @@ export function useCreatedTokens(piUid) {
       `)
       .eq('creator_uid', piUid)
       .order('created_at', { ascending: false })
-      .then(({ data }) => {
-        setTokens(data || [])
-        setLoading(false)
-      })
+      .then(({ data }) => { setTokens(data || []); setLoading(false) })
   }, [piUid])
 
   return { tokens, loading }
 }
 
-// ─── Fetch user's token holdings (portfolio) ─────────────
+// ─── User portfolio (holdings) ────────────────────────────
 export function usePortfolio(piUid) {
-  const [holdings, setHoldings] = useState([])
-  const [loading,  setLoading]  = useState(true)
+  const [holdings,   setHoldings]   = useState([])
+  const [loading,    setLoading]    = useState(true)
   const [totalValue, setTotalValue] = useState(0)
 
   useEffect(() => {
@@ -66,23 +63,17 @@ export function usePortfolio(piUid) {
       .from('token_holders')
       .select(`
         balance, updated_at,
-        tokens(
-          id, name, ticker, image_url,
-          current_price, price_change_24h, status
-        )
+        tokens(id, name, ticker, image_url, current_price, price_change_24h, status)
       `)
       .eq('user_uid', piUid)
       .gt('balance', 0)
       .order('updated_at', { ascending: false })
       .then(({ data }) => {
-        const holdings = data || []
-        // Calculate total portfolio value in Pi
-        const total = holdings.reduce((sum, h) => {
-          const price = parseFloat(h.tokens?.current_price || 0)
-          const bal   = parseFloat(h.balance || 0)
-          return sum + (price * bal)
+        const h = data || []
+        const total = h.reduce((sum, item) => {
+          return sum + (parseFloat(item.tokens?.current_price || 0) * parseFloat(item.balance || 0))
         }, 0)
-        setHoldings(holdings)
+        setHoldings(h)
         setTotalValue(total)
         setLoading(false)
       })
@@ -91,7 +82,7 @@ export function usePortfolio(piUid) {
   return { holdings, loading, totalValue }
 }
 
-// ─── Fetch user's trade history ───────────────────────────
+// ─── User trade history ───────────────────────────────────
 export function useUserTrades(piUid, limit = 30) {
   const [trades,  setTrades]  = useState([])
   const [loading, setLoading] = useState(true)
@@ -110,16 +101,13 @@ export function useUserTrades(piUid, limit = 30) {
       .eq('status', 'completed')
       .order('created_at', { ascending: false })
       .limit(limit)
-      .then(({ data }) => {
-        setTrades(data || [])
-        setLoading(false)
-      })
+      .then(({ data }) => { setTrades(data || []); setLoading(false) })
   }, [piUid, limit])
 
   return { trades, loading }
 }
 
-// ─── Fetch user stats summary ─────────────────────────────
+// ─── User stats summary ───────────────────────────────────
 export function useUserStats(piUid) {
   const [stats,   setStats]   = useState(null)
   const [loading, setLoading] = useState(true)
@@ -128,41 +116,20 @@ export function useUserStats(piUid) {
     if (!piUid) { setLoading(false); return }
 
     Promise.all([
-      // Total Pi spent (buys)
-      supabase
-        .from('trades')
-        .select('pi_amount')
-        .eq('trader_uid', piUid)
-        .eq('type', 'buy')
-        .eq('status', 'completed'),
-      // Total Pi received (sells)
-      supabase
-        .from('trades')
-        .select('pi_amount')
-        .eq('trader_uid', piUid)
-        .eq('type', 'sell')
-        .eq('status', 'completed'),
-      // Tokens created count
-      supabase
-        .from('tokens')
-        .select('id', { count: 'exact' })
-        .eq('creator_uid', piUid),
-      // Tokens holding count
-      supabase
-        .from('token_holders')
-        .select('id', { count: 'exact' })
-        .eq('user_uid', piUid)
-        .gt('balance', 0),
+      supabase.from('trades').select('pi_amount').eq('trader_uid', piUid).eq('type', 'buy').eq('status', 'completed'),
+      supabase.from('trades').select('pi_amount').eq('trader_uid', piUid).eq('type', 'sell').eq('status', 'completed'),
+      supabase.from('tokens').select('id', { count: 'exact' }).eq('creator_uid', piUid),
+      supabase.from('token_holders').select('id', { count: 'exact' }).eq('user_uid', piUid).gt('balance', 0),
     ]).then(([buys, sells, created, holding]) => {
-      const totalSpent    = (buys.data || []).reduce((s, t) => s + parseFloat(t.pi_amount), 0)
+      const totalSpent    = (buys.data  || []).reduce((s, t) => s + parseFloat(t.pi_amount), 0)
       const totalReceived = (sells.data || []).reduce((s, t) => s + parseFloat(t.pi_amount), 0)
       setStats({
-        totalTrades:    (buys.data?.length || 0) + (sells.data?.length || 0),
+        totalTrades:   (buys.data?.length  || 0) + (sells.data?.length || 0),
         totalSpent,
         totalReceived,
-        pnl:            totalReceived - totalSpent,
-        tokensCreated:  created.count || 0,
-        tokensHolding:  holding.count || 0,
+        pnl:           totalReceived - totalSpent,
+        tokensCreated: created.count  || 0,
+        tokensHolding: holding.count  || 0,
       })
       setLoading(false)
     })
