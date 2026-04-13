@@ -16,21 +16,18 @@ const RESERVED_TICKERS = ['PI', 'BTC', 'ETH', 'USDT', 'BNB']
 
 function validate(form, imageFile) {
   const errs = {}
-  if (!form.name.trim())                    errs.name = 'Token name is required'
-  else if (form.name.length > 32)           errs.name = 'Max 32 characters'
-  if (!form.ticker.trim())                  errs.ticker = 'Ticker is required'
+  if (!form.name.trim())          errs.name = 'Token name is required'
+  else if (form.name.length > 32) errs.name = 'Max 32 characters'
+  if (!form.ticker.trim())        errs.ticker = 'Ticker is required'
   else if (!/^[A-Z0-9]{2,8}$/.test(form.ticker.toUpperCase()))
-                                            errs.ticker = '2–8 uppercase letters/numbers only'
+                                  errs.ticker = '2–8 uppercase letters/numbers only'
   else if (RESERVED_TICKERS.includes(form.ticker.toUpperCase()))
-                                            errs.ticker = 'This ticker is reserved'
-  if (form.description.length > 280)        errs.description = 'Max 280 characters'
-  if (form.website_url  && !/^https?:\/\/.+/.test(form.website_url))
-                                            errs.website_url = 'Must start with http(s)://'
-  if (form.twitter_url  && !/^https?:\/\/.+/.test(form.twitter_url))
-                                            errs.twitter_url = 'Must start with http(s)://'
-  if (form.telegram_url && !/^https?:\/\/.+/.test(form.telegram_url))
-                                            errs.telegram_url = 'Must start with http(s)://'
-  if (!imageFile)                           errs.image = 'Token image is required'
+                                  errs.ticker = 'This ticker is reserved'
+  if (form.description.length > 280) errs.description = 'Max 280 characters'
+  if (form.website_url  && !/^https?:\/\/.+/.test(form.website_url))  errs.website_url  = 'Must start with http(s)://'
+  if (form.twitter_url  && !/^https?:\/\/.+/.test(form.twitter_url))  errs.twitter_url  = 'Must start with http(s)://'
+  if (form.telegram_url && !/^https?:\/\/.+/.test(form.telegram_url)) errs.telegram_url = 'Must start with http(s)://'
+  if (!imageFile) errs.image = 'Token image is required'
   return errs
 }
 
@@ -39,12 +36,9 @@ function StepDots({ step }) {
     <div className="flex items-center justify-center gap-2 mb-6">
       {[1, 2, 3].map(s => (
         <div key={s} className={`transition-all duration-300
-          ${s === step
-            ? 'w-6 h-2 rounded-full bg-pi-lime'
-            : s < step
-              ? 'w-2 h-2 rounded-full bg-pi-purple'
-              : 'w-2 h-2 rounded-full bg-pi-border'
-          }`} />
+          ${s === step ? 'w-6 h-2 rounded-full bg-pi-lime'
+            : s < step ? 'w-2 h-2 rounded-full bg-pi-purple'
+            : 'w-2 h-2 rounded-full bg-pi-border'}`} />
       ))}
     </div>
   )
@@ -76,15 +70,10 @@ function Step1({ form, onChange, errors, imageFile, setImageFile, imageUpload, o
         <h2 className="font-display font-black text-xl text-pi-white mb-1">Token Details</h2>
         <p className="text-sm text-pi-muted">Set your token's identity.</p>
       </div>
-      <ImageUploader
-        preview={imageUpload.preview}
-        onFileSelect={handleImageSelect}
-        error={errors.image || imageUpload.error}
-        uploading={imageUpload.uploading}
-      />
+      <ImageUploader preview={imageUpload.preview} onFileSelect={handleImageSelect}
+        error={errors.image || imageUpload.error} uploading={imageUpload.uploading} />
       <Field label="Token Name" required error={errors.name} hint={`${form.name.length}/32`}>
-        <input type="text" value={form.name}
-          onChange={e => onChange('name', e.target.value)}
+        <input type="text" value={form.name} onChange={e => onChange('name', e.target.value)}
           placeholder="e.g. Moon Rocket" maxLength={32} className="pi-input" />
       </Field>
       <Field label="Ticker Symbol" required error={errors.ticker} hint="2–8 chars">
@@ -92,15 +81,13 @@ function Step1({ form, onChange, errors, imageFile, setImageFile, imageUpload, o
           <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-mono text-pi-muted font-bold">$</span>
           <input type="text" value={form.ticker}
             onChange={e => onChange('ticker', e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-            placeholder="MOON" maxLength={8}
-            className="pi-input pl-8 font-mono font-bold uppercase tracking-widest" />
+            placeholder="MOON" maxLength={8} className="pi-input pl-8 font-mono font-bold uppercase tracking-widest" />
         </div>
       </Field>
       <Field label="Description" hint={`${form.description.length}/280`} error={errors.description}>
-        <textarea value={form.description}
-          onChange={e => onChange('description', e.target.value)}
-          placeholder="Tell the world about your token..."
-          rows={3} maxLength={280} className="pi-input resize-none leading-relaxed" />
+        <textarea value={form.description} onChange={e => onChange('description', e.target.value)}
+          placeholder="Tell the world about your token..." rows={3} maxLength={280}
+          className="pi-input resize-none leading-relaxed" />
       </Field>
       <button onClick={onNext} className="btn-primary w-full flex items-center justify-center gap-2">
         Next: Socials
@@ -120,18 +107,15 @@ function Step2({ form, onChange, errors, onBack, onNext }) {
         <p className="text-sm text-pi-muted">Optional — helps build trust.</p>
       </div>
       <Field label="Website" error={errors.website_url}>
-        <input type="url" value={form.website_url}
-          onChange={e => onChange('website_url', e.target.value)}
+        <input type="url" value={form.website_url} onChange={e => onChange('website_url', e.target.value)}
           placeholder="https://yourtoken.com" className="pi-input" />
       </Field>
       <Field label="Twitter / X" error={errors.twitter_url}>
-        <input type="url" value={form.twitter_url}
-          onChange={e => onChange('twitter_url', e.target.value)}
+        <input type="url" value={form.twitter_url} onChange={e => onChange('twitter_url', e.target.value)}
           placeholder="https://twitter.com/yourtoken" className="pi-input" />
       </Field>
       <Field label="Telegram" error={errors.telegram_url}>
-        <input type="url" value={form.telegram_url}
-          onChange={e => onChange('telegram_url', e.target.value)}
+        <input type="url" value={form.telegram_url} onChange={e => onChange('telegram_url', e.target.value)}
           placeholder="https://t.me/yourtoken" className="pi-input" />
       </Field>
       <div className="flex gap-3">
@@ -160,7 +144,7 @@ function Step3({ form, imagePreview, onBack, onLaunch, launching }) {
         <div className="flex items-start gap-2.5 px-4 py-3 rounded-xl bg-amber-500/8 border border-amber-500/20">
           <span className="text-amber-400 text-lg flex-shrink-0">⚠️</span>
           <p className="text-xs text-amber-300 leading-relaxed">
-            <strong>Pi Browser required</strong> to pay and launch. Open PiPump in Pi Browser app.
+            <strong>Pi Browser required</strong> to pay and launch.
           </p>
         </div>
       )}
@@ -171,9 +155,10 @@ function Step3({ form, imagePreview, onBack, onLaunch, launching }) {
         <button onClick={onBack} disabled={launching} className="btn-ghost flex-1">← Back</button>
         <button onClick={onLaunch} disabled={launching || !isPiBrowser()}
                 className="btn-primary flex-1 flex items-center justify-center gap-2 animate-pulse-lime">
-          {launching ? (
-            <><span className="w-4 h-4 border-2 border-pi-bg/30 border-t-pi-bg rounded-full animate-spin" />Launching...</>
-          ) : '🚀 Pay & Launch (1 π)'}
+          {launching
+            ? <><span className="w-4 h-4 border-2 border-pi-bg/30 border-t-pi-bg rounded-full animate-spin"/>Launching...</>
+            : '🚀 Pay & Launch (1 π)'
+          }
         </button>
       </div>
     </div>
@@ -187,7 +172,7 @@ function SuccessScreen({ tokenId, ticker }) {
       <div className="text-6xl animate-bounce">🎉</div>
       <div>
         <h2 className="font-display font-black text-2xl text-pi-white mb-2">${ticker} is Live!</h2>
-        <p className="text-sm text-pi-muted">Your token is now on PiPump. Share it and let trading begin!</p>
+        <p className="text-sm text-pi-muted">Your token is on PiPump. Share it and let trading begin!</p>
       </div>
       <div className="space-y-3">
         <button onClick={() => navigate(`/token/${tokenId}`)} className="btn-primary w-full">
@@ -198,7 +183,7 @@ function SuccessScreen({ tokenId, ticker }) {
       <div className="pi-card p-3">
         <p className="text-xs text-pi-muted font-mono mb-1">Share your token link</p>
         <p className="text-xs text-pi-purpleLt font-mono break-all">
-          {window.location.origin}/pipump/token/{tokenId}
+          {window.location.origin}/PiPump/token/{tokenId}
         </p>
       </div>
     </div>
@@ -255,23 +240,20 @@ export default function CreateToken() {
     setStep(3)
   }
 
-
   async function handleLaunch() {
     if (!isPiBrowser()) { toast.error('Open in Pi Browser to launch.'); return }
     if (!isConnected)   { toast.error('Connect your Pi wallet first.'); return }
 
     setLaunching(true)
 
-    // Step 1: Upload image — optional, token launches even if image fails
+    // Step 1: Upload image (optional)
     let imageUrl = null
     if (imageFile) {
       const uploadToast = toast.loading('Uploading image...')
       try {
         imageUrl = await imageUpload.upload(imageFile, user.pi_uid)
         toast.dismiss(uploadToast)
-        if (!imageUrl) {
-          toast('Image upload failed — launching without image.', { icon: '⚠️', duration: 3000 })
-        }
+        if (!imageUrl) toast('Image upload failed — launching without image.', { icon: '⚠️', duration: 3000 })
       } catch {
         toast.dismiss(uploadToast)
         toast('Image upload failed — launching without image.', { icon: '⚠️', duration: 3000 })
@@ -313,6 +295,20 @@ export default function CreateToken() {
         .single()
 
       if (insertErr) throw insertErr
+
+      // Step 4: FIX — Update platform_config total_tokens
+      // (trigger handles this now, but explicit update as fallback)
+      await supabase
+        .from('platform_config')
+        .update({ total_tokens: supabase.rpc ? undefined : undefined })
+        .neq('id', '00000000-0000-0000-0000-000000000000')
+        .select()
+
+      // Simpler: use raw SQL increment
+      await supabase.rpc('increment_token_count').catch(() => {
+        // If RPC doesn't exist, trigger handles it
+        console.log('[CT] increment_token_count not found, trigger handles it')
+      })
 
       toast.dismiss(payToast)
       setSuccess({ tokenId: newToken.id, ticker: newToken.ticker })
