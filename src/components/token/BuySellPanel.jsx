@@ -3,8 +3,7 @@ import toast from 'react-hot-toast'
 import { useAuth } from '../../hooks/useAuth'
 import {
   getBuyQuote, getSellQuote,
-  formatPrice, formatTokenAmount, formatPi,
-  INITIAL_STATE
+  formatPrice, formatTokenAmount, formatPi, INITIAL_STATE
 } from '../../lib/bondingCurve'
 import { payToBuyTokens } from '../../lib/piSDK'
 import { supabase } from '../../lib/supabase'
@@ -23,34 +22,9 @@ function QuoteRow({ label, value, highlight }) {
   )
 }
 
-function PiBrowserWall() {
-  return (
-    <div className="text-center py-6 px-4">
-      <div className="text-4xl mb-3">📱</div>
-      <p className="font-display font-bold text-pi-white mb-2">Pi Browser Required</p>
-      <p className="text-sm text-pi-muted leading-relaxed">
-        Open PiPump in Pi Browser to buy and sell tokens.
-      </p>
-    </div>
-  )
-}
-
-function ConnectWall({ onConnect, loading }) {
-  return (
-    <div className="text-center py-6 px-4">
-      <div className="text-4xl mb-3">👛</div>
-      <p className="font-display font-bold text-pi-white mb-2">Connect Your Wallet</p>
-      <p className="text-sm text-pi-muted mb-4">Connect Pi wallet to start trading.</p>
-      <button onClick={onConnect} disabled={loading} className="btn-primary w-full">
-        {loading ? 'Connecting...' : 'Connect Pi Wallet'}
-      </button>
-    </div>
-  )
-}
-
-// ─── Execute trade in Supabase ────────────────────────────
-async function runExecuteTrade({ tokenId, traderUid, type, piAmount, tokenAmount, fee, paymentId, txId }) {
-  console.log('[Trade] Running execute_trade:', { type, piAmount, tokenAmount, fee })
+// Calls execute_trade RPC
+async function runTrade({ tokenId, traderUid, type, piAmount, tokenAmount, fee, paymentId, txId }) {
+  console.log('[Trade] RPC execute_trade:', { type, piAmount, tokenAmount: Math.floor(tokenAmount), fee })
 
   const { data, error } = await supabase.rpc('execute_trade', {
     p_token_id:      tokenId,
@@ -59,16 +33,16 @@ async function runExecuteTrade({ tokenId, traderUid, type, piAmount, tokenAmount
     p_pi_amount:     parseFloat(piAmount),
     p_token_amount:  Math.floor(parseFloat(tokenAmount)),
     p_fee_amount:    parseFloat(fee),
-    p_pi_payment_id: paymentId,
-    p_pi_tx_id:      txId,
+    p_pi_payment_id: String(paymentId),
+    p_pi_tx_id:      String(txId),
   })
 
   if (error) {
-    console.error('[Trade] execute_trade error:', JSON.stringify(error))
+    console.error('[Trade] execute_trade failed:', error)
     throw new Error(error.message || 'Trade execution failed')
   }
 
-  console.log('[Trade] execute_trade success, trade_id:', data)
+  console.log('[Trade] execute_trade success, id:', data)
   return data
 }
 
@@ -86,36 +60,28 @@ export default function BuySellPanel({ token, userHolding = 0, onTradeComplete }
     k:                   parseFloat(token.k_constant            || INITIAL_STATE.k),
   }
 
-  const isGraduated = token.status === 'graduated'
-
-  // Recalculate quote on amount change
   useEffect(() => {
     const val = parseFloat(amount)
     if (!val || val <= 0) { setQuote(null); return }
     try {
       setQuote(tab === 'buy' ? getBuyQuote(state, val) : getSellQuote(state, val))
-    } catch {
-      setQuote(null)
-    }
+    } catch { setQuote(null) }
   }, [amount, tab, token.virtual_pi_reserve, token.virtual_token_reserve])
 
-  useEffect(() => {
-    setAmount('')
-    setQuote(null)
-  }, [tab])
+  useEffect(() => { setAmount(''); setQuote(null) }, [tab])
 
   function setPreset(val) {
-    if (tab === 'sell') {
-      setAmount(Math.floor((userHolding * val) / 100).toString())
-    } else {
-      setAmount(val.toString())
-    }
+    setAmount(
+      tab === 'sell'
+        ? Math.floor((userHolding * val) / 100).toString()
+        : val.toString()
+    )
   }
 
-  // ─── BUY ─────────────────────────────────────────────
+  // ─── BUY ───────────────────────────────────────────────
   async function handleBuy() {
     const piAmount = parseFloat(amount)
-    if (!piAmount || piAmount <= 0) return toast.error('Enter a valid Pi amount')
+    if (!piAmount || piAmount <= 0) return toast.error('Enter a Pi amount')
     if (!quote || quote.tokensOut <= 0) return toast.error('Invalid amount')
 
     setTrading(true)
@@ -123,35 +89,18 @@ export default function BuySellPanel({ token, userHolding = 0, onTradeComplete }
 
     try {
       await payToBuyTokens(token.ticker, piAmount, {
-
         onReadyForServerApproval: async (pid) => {
-          console.log('[Buy] Payment approved:', pid)
-          // Record pending trade
-          await supabase.from('trades').insert({
-            token_id:        token.id,
-            trader_uid:      user.pi_uid,
-            type:            'buy',
-            pi_amount:       piAmount,
-            token_amount:    Math.floor(quote.tokensOut),
-            price_per_token: quote.priceBefore,
-            fee_amount:      quote.fee,
-            pi_payment_id:   pid,
-            status:          'pending',
-          }).then(({ error }) => {
-            if (error) console.warn('[Buy] Pending trade insert error:', error.message)
-          })
+          console.log('[Buy] Payment approved, id:', pid)
+          // No pending insert — execute_trade handles everything
         },
-
         onReadyForServerCompletion: async (pid, txid) => {
-          toast.loading('Confirming trade on blockchain...', { id: loadingToast })
-          console.log('[Buy] Payment complete, executing trade...')
-
-          // Execute trade — this updates all stats
-          await runExecuteTrade({
+          toast.loading('Recording trade...', { id: loadingToast })
+          // This throws if fails — piSDK will reject the promise
+          await runTrade({
             tokenId:     token.id,
             traderUid:   user.pi_uid,
             type:        'buy',
-            piAmount:    piAmount,
+            piAmount,
             tokenAmount: quote.tokensOut,
             fee:         quote.fee,
             paymentId:   pid,
@@ -162,72 +111,74 @@ export default function BuySellPanel({ token, userHolding = 0, onTradeComplete }
 
       toast.dismiss(loadingToast)
       toast.success(`🎉 Bought ${formatTokenAmount(quote.tokensOut)} $${token.ticker}!`, { duration: 5000 })
-      setAmount('')
-      setQuote(null)
+      setAmount(''); setQuote(null)
       onTradeComplete?.()
 
     } catch (err) {
       toast.dismiss(loadingToast)
-      toast.dismiss('confirm')
-      if (err.message === 'PAYMENT_CANCELLED') {
-        toast('Payment cancelled.', { icon: '❌' })
-      } else if (err.message === 'PI_BROWSER_REQUIRED') {
-        toast.error('Open in Pi Browser to trade.')
-      } else {
-        toast.error(`Trade failed: ${err.message || 'Try again'}`)
-        console.error('[Buy] Error:', err)
-      }
-    } finally {
-      setTrading(false)
-    }
+      const msg = err?.message || ''
+      if (msg === 'PAYMENT_CANCELLED') toast('Payment cancelled.', { icon: '❌' })
+      else if (msg === 'PI_BROWSER_REQUIRED') toast.error('Open in Pi Browser to trade.')
+      else { toast.error(`Trade failed: ${msg || 'Unknown error'}`); console.error('[Buy]', err) }
+    } finally { setTrading(false) }
   }
 
-  // ─── SELL ────────────────────────────────────────────
+  // ─── SELL ──────────────────────────────────────────────
   async function handleSell() {
     const tokenAmount = parseFloat(amount)
-    if (!tokenAmount || tokenAmount <= 0) return toast.error('Enter a valid token amount')
-    if (tokenAmount > userHolding) return toast.error('Insufficient token balance')
-    if (!quote || quote.piOut <= 0) return toast.error('Invalid amount')
+    if (!tokenAmount || tokenAmount <= 0) return toast.error('Enter token amount')
+    if (tokenAmount > userHolding)        return toast.error('Insufficient balance')
+    if (!quote || quote.piOut <= 0)       return toast.error('Invalid amount')
 
     setTrading(true)
-    const loadingToast = toast.loading('Processing sell...')
+    const sellToast = toast.loading('Processing sell...')
 
     try {
-      console.log('[Sell] Executing sell trade...')
-
-      await runExecuteTrade({
+      await runTrade({
         tokenId:     token.id,
         traderUid:   user.pi_uid,
         type:        'sell',
         piAmount:    quote.piOut,
-        tokenAmount: tokenAmount,
+        tokenAmount,
         fee:         quote.fee,
         paymentId:   `sell-${Date.now()}`,
         txId:        `testnet-sell-${Date.now()}`,
       })
 
-      toast.dismiss(loadingToast)
-      toast.success(
-        `💰 Sold ${formatTokenAmount(tokenAmount)} $${token.ticker} for ${formatPi(quote.piOut)}`,
-        { duration: 5000 }
-      )
-      setAmount('')
-      setQuote(null)
+      toast.dismiss(sellToast)
+      toast.success(`💰 Sold ${formatTokenAmount(tokenAmount)} $${token.ticker} for ${formatPi(quote.piOut)}`, { duration: 5000 })
+      setAmount(''); setQuote(null)
       onTradeComplete?.()
 
     } catch (err) {
-      toast.dismiss(loadingToast)
-      toast.error(`Sell failed: ${err.message || 'Try again'}`)
-      console.error('[Sell] Error:', err)
-    } finally {
-      setTrading(false)
-    }
+      toast.dismiss(sellToast)
+      toast.error(`Sell failed: ${err?.message || 'Try again'}`)
+      console.error('[Sell]', err)
+    } finally { setTrading(false) }
   }
 
-  if (!inPiBrowser) return <PiBrowserWall />
-  if (!isConnected)  return <ConnectWall onConnect={connectWallet} loading={authLoading} />
-
-  if (isGraduated) {
+  if (!inPiBrowser) {
+    return (
+      <div className="text-center py-6 px-4">
+        <div className="text-4xl mb-3">📱</div>
+        <p className="font-display font-bold text-pi-white mb-2">Pi Browser Required</p>
+        <p className="text-sm text-pi-muted">Open PiPump in Pi Browser to trade.</p>
+      </div>
+    )
+  }
+  if (!isConnected) {
+    return (
+      <div className="text-center py-6 px-4">
+        <div className="text-4xl mb-3">👛</div>
+        <p className="font-display font-bold text-pi-white mb-2">Connect Your Wallet</p>
+        <p className="text-sm text-pi-muted mb-4">Connect Pi wallet to start trading.</p>
+        <button onClick={connectWallet} disabled={authLoading} className="btn-primary w-full">
+          {authLoading ? 'Connecting...' : 'Connect Pi Wallet'}
+        </button>
+      </div>
+    )
+  }
+  if (token.status === 'graduated') {
     return (
       <div className="text-center py-6 px-4">
         <div className="text-4xl mb-3">🎓</div>
@@ -239,28 +190,24 @@ export default function BuySellPanel({ token, userHolding = 0, onTradeComplete }
 
   return (
     <div className="pi-card overflow-hidden">
-
       {/* Tabs */}
       <div className="flex">
-        <button onClick={() => setTab('buy')}
-                className={`flex-1 py-3.5 text-sm font-display font-bold transition-all
-                            ${tab === 'buy'
-                              ? 'bg-pi-green/15 text-green-400 border-b-2 border-green-400'
-                              : 'text-pi-muted hover:text-pi-text border-b border-pi-border'}`}>
-          Buy
-        </button>
-        <button onClick={() => setTab('sell')}
-                className={`flex-1 py-3.5 text-sm font-display font-bold transition-all
-                            ${tab === 'sell'
-                              ? 'bg-pi-red/10 text-pi-red border-b-2 border-pi-red'
-                              : 'text-pi-muted hover:text-pi-text border-b border-pi-border'}`}>
-          Sell
-        </button>
+        {['buy','sell'].map(t => (
+          <button key={t} onClick={() => setTab(t)}
+            className={`flex-1 py-3.5 text-sm font-display font-bold transition-all
+              ${tab === t
+                ? t === 'buy'
+                  ? 'bg-pi-green/15 text-green-400 border-b-2 border-green-400'
+                  : 'bg-pi-red/10 text-pi-red border-b-2 border-pi-red'
+                : 'text-pi-muted hover:text-pi-text border-b border-pi-border'
+              }`}>
+            {t === 'buy' ? 'Buy' : 'Sell'}
+          </button>
+        ))}
       </div>
 
       <div className="p-4 space-y-4">
-
-        {/* Balance row */}
+        {/* Balance */}
         <div className="flex justify-between items-center">
           {tab === 'buy' ? (
             <p className="text-xs text-pi-muted font-mono">
@@ -279,15 +226,11 @@ export default function BuySellPanel({ token, userHolding = 0, onTradeComplete }
 
         {/* Input */}
         <div className="relative">
-          <input
-            type="number"
-            value={amount}
+          <input type="number" value={amount}
             onChange={e => setAmount(e.target.value)}
             placeholder={tab === 'buy' ? '0.0 Pi' : `0 ${token.ticker}`}
-            min="0"
-            step={tab === 'buy' ? '0.1' : '1'}
-            className="pi-input pr-16 font-mono text-base"
-          />
+            min="0" step={tab === 'buy' ? '0.1' : '1'}
+            className="pi-input pr-16 font-mono text-base" />
           <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-mono text-pi-muted font-bold">
             {tab === 'buy' ? 'π' : `$${token.ticker}`}
           </span>
@@ -295,24 +238,14 @@ export default function BuySellPanel({ token, userHolding = 0, onTradeComplete }
 
         {/* Presets */}
         <div className="flex gap-2">
-          {tab === 'buy'
-            ? BUY_PRESETS.map(v => (
-                <button key={v} onClick={() => setPreset(v)}
-                        className="flex-1 py-1.5 rounded-lg text-xs font-mono font-bold
-                                   bg-pi-card border border-pi-border text-pi-muted
-                                   hover:border-pi-green/40 hover:text-green-400 active:scale-95 transition-all">
-                  {v}π
-                </button>
-              ))
-            : SELL_PRESETS.map(v => (
-                <button key={v} onClick={() => setPreset(v)}
-                        className="flex-1 py-1.5 rounded-lg text-xs font-mono font-bold
-                                   bg-pi-card border border-pi-border text-pi-muted
-                                   hover:border-pi-red/40 hover:text-pi-red active:scale-95 transition-all">
-                  {v}%
-                </button>
-              ))
-          }
+          {(tab === 'buy' ? BUY_PRESETS : SELL_PRESETS).map(v => (
+            <button key={v} onClick={() => setPreset(v)}
+              className={`flex-1 py-1.5 rounded-lg text-xs font-mono font-bold active:scale-95 transition-all
+                bg-pi-card border border-pi-border text-pi-muted
+                ${tab === 'buy' ? 'hover:border-pi-green/40 hover:text-green-400' : 'hover:border-pi-red/40 hover:text-pi-red'}`}>
+              {tab === 'buy' ? `${v}π` : `${v}%`}
+            </button>
+          ))}
         </div>
 
         {/* Quote */}
@@ -320,68 +253,61 @@ export default function BuySellPanel({ token, userHolding = 0, onTradeComplete }
           <div className="bg-pi-bg rounded-xl p-3 border border-pi-border/50 space-y-0.5">
             {tab === 'buy' ? (
               <>
-                <QuoteRow label="You receive" value={`${formatTokenAmount(quote.tokensOut)} $${token.ticker}`} highlight />
-                <QuoteRow label="Price per token" value={`${formatPrice(quote.priceAfter)} π`} />
+                <QuoteRow label="You receive"  value={`${formatTokenAmount(quote.tokensOut)} $${token.ticker}`} highlight />
+                <QuoteRow label="Avg price"    value={`${formatPrice(quote.priceAfter)} π`} />
                 <QuoteRow label="Price impact" value={`${quote.priceImpact}%`} />
-                <QuoteRow label="Platform fee" value={formatPi(quote.fee)} />
+                <QuoteRow label="Fee"          value={formatPi(quote.fee)} />
               </>
             ) : (
               <>
-                <QuoteRow label="You receive" value={formatPi(quote.piOut)} highlight />
-                <QuoteRow label="Price per token" value={`${formatPrice(quote.priceAfter)} π`} />
+                <QuoteRow label="You receive"  value={formatPi(quote.piOut)} highlight />
+                <QuoteRow label="Avg price"    value={`${formatPrice(quote.priceAfter)} π`} />
                 <QuoteRow label="Price impact" value={`-${quote.priceImpact}%`} />
-                <QuoteRow label="Platform fee" value={formatPi(quote.fee)} />
+                <QuoteRow label="Fee"          value={formatPi(quote.fee)} />
               </>
             )}
           </div>
         )}
 
-        {/* High impact warning */}
         {quote && parseFloat(quote.priceImpact) > 5 && (
-          <div className="flex items-start gap-2 px-3 py-2.5 rounded-xl bg-amber-500/8 border border-amber-500/20">
-            <span className="text-amber-400 text-sm flex-shrink-0">⚠️</span>
+          <div className="flex gap-2 px-3 py-2 rounded-xl bg-amber-500/8 border border-amber-500/20">
+            <span className="text-amber-400 flex-shrink-0">⚠️</span>
             <p className="text-xs text-amber-300">High price impact ({quote.priceImpact}%). Try a smaller amount.</p>
           </div>
         )}
 
         {/* Action button */}
         {tab === 'buy' ? (
-          <button onClick={handleBuy} disabled={trading || !amount || !quote}
-                  className="btn-buy flex items-center justify-center gap-2">
+          <button onClick={handleBuy}
+            disabled={trading || !amount || !quote || parseFloat(amount) <= 0}
+            className="btn-buy flex items-center justify-center gap-2">
             {trading
-              ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Processing...</>
-              : `Buy $${token.ticker}`
-            }
+              ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Processing...</>
+              : `Buy $${token.ticker}`}
           </button>
         ) : (
           <button onClick={handleSell}
-                  disabled={trading || !amount || !quote || parseFloat(amount) > userHolding || userHolding <= 0}
-                  className="btn-sell flex items-center justify-center gap-2">
+            disabled={trading || !amount || !quote || parseFloat(amount) > userHolding || userHolding <= 0}
+            className="btn-sell flex items-center justify-center gap-2">
             {trading
-              ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"/>Processing...</>
-              : userHolding <= 0
-                ? `No ${token.ticker} to sell`
-                : `Sell $${token.ticker}`
-            }
+              ? <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Processing...</>
+              : userHolding <= 0 ? 'No tokens to sell' : `Sell $${token.ticker}`}
           </button>
         )}
 
         {/* Slippage */}
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-pi-muted font-mono">Slippage tolerance</span>
+          <span className="text-[11px] text-pi-muted font-mono">Slippage</span>
           <div className="flex gap-1.5">
             {[0.5, 1, 2].map(s => (
               <button key={s} onClick={() => setSlippage(s)}
-                      className={`px-2 py-1 rounded-lg text-[11px] font-mono font-bold transition-all
-                                  ${slippage === s
-                                    ? 'bg-pi-purple/20 text-pi-purpleLt border border-pi-purple/30'
-                                    : 'text-pi-muted hover:text-pi-text'}`}>
+                className={`px-2 py-1 rounded-lg text-[11px] font-mono font-bold transition-all
+                  ${slippage === s ? 'bg-pi-purple/20 text-pi-purpleLt border border-pi-purple/30' : 'text-pi-muted hover:text-pi-text'}`}>
                 {s}%
               </button>
             ))}
           </div>
         </div>
-
       </div>
     </div>
   )
