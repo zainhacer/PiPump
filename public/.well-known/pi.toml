@@ -1,11 +1,19 @@
 # Pi Network App Verification
+<<<<<<< HEAD
 # This file must be at: https://zainhacer.github.io/.well-known/pi.toml
 # OR at: https://zainhacer.github.io/PiPump/.well-known/pi.toml
+=======
+# Place this file at: public/.well-known/pi.toml
+>>>>>>> 2565eed5f2db1b0311071ec474f4ce3cd158f171
 
 [app]
 name = "pipump"
 description = "PiPump — Launch and trade memecoins on Pi Network"
+<<<<<<< HEAD
 url = "https://zainhacer.github.io/PiPump/"
+=======
+url = "https://yourusername.github.io/pipump/"
+>>>>>>> 2565eed5f2db1b0311071ec474f4ce3cd158f171
 
 [payments]
 enabled = true
